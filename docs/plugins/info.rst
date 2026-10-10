@@ -23,8 +23,9 @@ library:
     $ beet info beatles
 
 If you just want to see specific properties you can use the ``--include-keys``
-option to filter them. The argument is a comma-separated list of field names.
-For example:
+option to filter them. The argument is a comma-separated list of field names
+or simple glob patterns where ``*`` matches any string (patterns match the
+built-in fields and the ones plugins declare). For example:
 
 ::
 

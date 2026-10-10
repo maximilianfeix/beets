@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import mediafile
 
 from beets import ui
-from beets.library import Item
+from beets.library import Album, Item
 from beets.plugins import BeetsPlugin
 from beets.util import displayable_path, normpath, syspath
 
@@ -31,6 +32,22 @@ class InfoCLIOpts(Protocol):
     keys_only: bool | None
     library: bool | None
     summarize: bool | None
+
+
+def expand_keys(patterns: list[str], available: Iterable[str]) -> list[str]:
+    """Expand glob patterns such as ``mb*`` into the matching field names.
+
+    A pattern without a wildcard is kept as given, so asking for a field that
+    has no value still shows it. A pattern that matches nothing adds nothing.
+    """
+    names = sorted(available)
+    keys: list[str] = []
+    for pattern in patterns:
+        if any(char in pattern for char in "*?["):
+            keys.extend(k for k in names if fnmatch.fnmatchcase(k, pattern))
+        else:
+            keys.append(pattern)
+    return list(dict.fromkeys(keys))
 
 
 def tag_data(
@@ -63,7 +80,7 @@ def tag_data_emitter(path: bytes) -> DataEmitter:
         if included_keys == "*":
             fields = tag_fields()
         else:
-            fields = included_keys
+            fields = expand_keys(included_keys, tag_fields())
         if "images" in fields:
             # We can't serialize the image data.
             fields.remove("images")
@@ -90,10 +107,25 @@ def library_data(
         yield library_data_emitter(item)
 
 
+def model_fields(model: LibModel) -> set[str]:
+    """The field names a glob can match for this kind of model.
+
+    Fixed, computed and plugin-declared fields of the model class (plus the
+    album's, for items), not the fields this one object happens to have, so
+    every exported row ends up with the same keys.
+    """
+    fields = {*model.all_keys(), *model._types}
+    if isinstance(model, Item):
+        fields |= {*Album.all_keys(), *Album._types}
+    return fields
+
+
 def library_data_emitter(model: LibModel) -> DataEmitter:
     def emitter(
         included_keys: Literal["*"] | list[str],
     ) -> tuple[JSONDict, LibModel]:
+        if included_keys != "*":
+            included_keys = expand_keys(included_keys, model_fields(model))
         data = dict(model.formatted(included_keys=included_keys))
 
         return data, model
@@ -229,6 +261,9 @@ class InfoPlugin(BeetsPlugin):
             except (mediafile.UnreadableFileError, OSError) as ex:
                 self._log.error("cannot read file: {}", ex)
                 continue
+            if included_keys:
+                # a glob like `p*` may have matched it again
+                data.pop("path", None)
 
             if opts.summarize:
                 update_summary(summary, data)

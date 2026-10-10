@@ -67,3 +67,70 @@ class ExportPluginTest(IOMixin, PluginTestCase):
                 txt = details.text
                 assert tag in self.test_values, tag
                 assert self.test_values[tag] == txt, txt
+
+    def test_include_keys_glob_matches_library_fields(self):
+        item = self.create_item()
+        item.mb_trackid = "xtrackid"
+        item.mb_albumid = "xalbumid"
+        item.store()
+
+        out = self.run_with_output(
+            "export", "-f", "json", "--library", "-i", "title,mb_*id", "xartist"
+        )
+
+        data = json.loads(out)[0]
+        assert data["title"] == "xtitle"
+        assert data["mb_trackid"] == "xtrackid"
+        assert data["mb_albumid"] == "xalbumid"
+        assert "mb_*id" not in data
+        assert "artist" not in data
+
+    def test_include_keys_glob_matches_tag_fields(self):
+        item = self.create_item()
+
+        out = self.run_with_output(
+            "export", "-f", "json", "-i", "titl*", item.artist
+        )
+
+        data = json.loads(out)[0]
+        assert data == {"title": "xtitle"}
+
+    def test_include_keys_glob_without_matches_adds_nothing(self):
+        item = self.create_item()
+
+        out = self.run_with_output(
+            "export", "-f", "json", "-i", "title,nosuchfield*", item.artist
+        )
+
+        assert json.loads(out)[0] == {"title": "xtitle"}
+
+    def test_include_keys_glob_gives_every_csv_row_the_same_columns(self):
+        first, second = self.add_item_fixtures(count=2)
+        for item, title in ((first, "one"), (second, "two")):
+            item.artist = "xartist"
+            item.title = title
+            item.store()
+        # a flexible attribute on the second item only
+        second.play_count = 3
+        second.store()
+
+        out = self.run_with_output(
+            "export", "-f", "csv", "--library", "-i", "title,play*", "xartist"
+        )
+
+        rows = out.strip().splitlines()
+        assert rows[0].strip() == "title"
+        assert sorted(r.strip() for r in rows[1:]) == ["one", "two"]
+
+    def test_include_keys_glob_in_album_mode(self):
+        album = self.add_album_fixture()
+        album.mb_albumid = "xalbumid"
+        album.store()
+
+        out = self.run_with_output(
+            "export", "-f", "json", "--album", "-i", "album,mb_albumid*"
+        )
+
+        data = json.loads(out)[0]
+        assert data["mb_albumid"] == "xalbumid"
+        assert "album" in data
